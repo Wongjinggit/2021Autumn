@@ -1,0 +1,158 @@
+#include <stdlib.h>
+#include <cv.h>
+#include <cmath>
+#include <highgui.h>
+#include <opencv2/opencv.hpp>
+#include <opencv2/core/core.hpp>
+#include "ros/ros.h"
+#include "std_msgs/String.h"
+#include "std_msgs/Bool.h"
+#include "std_msgs/Float32.h"
+#include<geometry_msgs/Twist.h>
+#include "sensor_msgs/Image.h"
+#define LINEAR_X 0
+using namespace cv;
+//////////////////////滤波//////////////////
+// 空域高斯滤波器函数
+void Gaussian(Mat input, double sigma)
+{
+    Mat grey, output;
+    cvtColor(input, grey, COLOR_BGR2GRAY);
+    cvtColor(input, output, COLOR_BGR2GRAY);
+    int a = 3 * sigma;
+    double gaussi[a][a];
+    int c = (a - 1) / 2;
+    double r, gsum = 0;
+    for (int i = 0;i < 3 * sigma;i++)
+    {
+        for (int j = 0;j < 3 * sigma;j++)
+        {
+            r = sqrt((i - c) * (i - c) + (j - c) * (j - c));
+            gaussi[i][j] = exp(-r * r / (2 * sigma * sigma));
+            gsum = gaussi[i][j] + gsum;
+        }
+    }
+    for (i = c;i < grey.rows - c;i++)
+    {
+        for (j = c;j < grey.cols - c;j++)
+        {
+            double gtr = 0;
+            for (int m = 0;m < a;m++)
+            {
+                uchar* pi = grey.ptr<uchar>(i - c + m);
+                for (int n = 0;n < a;n++)
+                {
+                    gtr += pi[j - c + m] * gaussi[m][n];
+                }
+            }
+            uchar* po = output.ptr<uchar>(i);
+            po[j] = round(gtr / gsum);
+        }
+    }
+    imshow("grey", grey);
+    imshow("gaussi_tf", output);
+}
+//////////////////////形态学//////////////////
+// 膨胀函数
+void Dilate(Mat Src)
+{
+    Mat grey, Tem, Dst;
+    cvtColor(Src, grey, COLOR_BGR2GRAY);
+    threshold(grey, Tem, 127, 255, CV_THRESH_BINARY);
+    threshold(grey, Dst, 127, 255, CV_THRESH_BINARY);
+    int SE[2][2] = { 255,255,255,0};//膨胀所用结构元
+    for (int i = 0;i < Tem.rows - 1;i++)
+    {
+        for (int j = 0;j < Tem.cols - 1.;j++)
+        {
+            uchar* pi = Tem.ptr<uchar>(i);
+            if(pi[j]==255)
+            {
+                for（m = 0;m < 2;m++)
+               {
+                   uchar* po =Dst.ptr<uchar>(i+m)
+                   for (n = 0;n < 2;n++)
+                 {
+                       if (po[j + n] == 0 && SE[m][n] == 255)
+                           po[j + n] = 255;
+                 {
+               }
+            }
+        }
+    }
+    imshow("binary", Tem);
+    imshow("binary_dilate", Dst);
+}
+// 腐蚀函数
+void Erode(Mat Src, Mat Tem, Mat Dst)
+{
+    Mat grey, Tem, Dst;
+    cvtColor(Src, grey, COLOR_BGR2GRAY);
+    threshold(grey, Tem, 127, 255, CV_THRESH_BINARY);
+    threshold(grey, Dst, 127, 255, CV_THRESH_BINARY);
+    int SE[3][3] = { 0,255,0,255,255,255,0,255,0 };//腐蚀所用结构元
+    for (int i = 1;i < Tem.rows - 1;i++)
+    {
+        for (int j = 1;j < Tem.cols - 1;j++)
+        {
+            int t = 255;
+            for（m = 0;m < 3;m++)
+            {
+               uchar* pi = Tem.ptr<uchar>(i - 1 + m);
+               for (n = 0;n < 3;n++)
+               {
+                  if（SE[m][n] == 255 && pi[j - 1 + n] != 255)
+                   {
+                     t = 0;
+                     break;
+                   }
+                }
+                if (t == 0) break;
+            }
+            uchar* po = Dst.ptr<uchar>(i);
+            po[j] = t;
+        }
+    }
+    imshow("binary", Tem);
+    imshow("binary_erode", Dst);
+}
+int main(int argc, char** argv)
+{
+    VideoCapture capture;
+    capture.open(1); // 1 为打开 zed 相机, 0 为打开笔记本摄像头
+    ROS_WARN("*****START");
+    ros::init(argc, argv, "trafficLaneTrack");//初始化 ROS 节点
+    ros::NodeHandle n;
+    // ros::Rate loop_rate(10);//定义速度发布频率
+    ros::Publisher pub = n.advertise<geometry_msgs::Twist>("/smoother_cmd_vel", 5);//定
+    义速度发布器
+        if (!capture.isOpened())
+        {
+            printf("摄像头没有正常打开，重新插拔工控机上当摄像头\n");
+            return 0;
+        }
+    waitKey(1000);
+    Mat frame;//当前帧图片
+    int nFrames = 0;//图片帧数
+    int frameWidth = capture.get(CV_CAP_PROP_FRAME_WIDTH);//图片宽
+    int frameHeight = capture.get(CV_CAP_PROP_FRAME_HEIGHT);//图片高
+    while (ros::ok())
+    {
+        capture.read(frame);
+        if (frame.empty())
+        {
+            break;
+        }// Mat frIn = frame.clone();//使用笔记本摄像头
+        Mat frIn = frame(cv::Rect(0, 0, frame.cols / 2, frame.rows));//截取 zed 的左目图片
+        // 空域滤波函数
+        Gaussian(frIn,3);
+        // 膨胀函数
+        Dilate(frIn);
+        // 腐蚀函数
+        Erode(frIn);
+        imshow("1", frIn);
+        ros::spinOnce();
+        waitKey(5);
+    }
+    return 0;
+}
